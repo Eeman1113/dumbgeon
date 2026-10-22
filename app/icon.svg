@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Phosphor prompt: the wordmark's own ">" and block cursor, so the tab
+       icon and the logo are visibly the same mark. -->
+  <defs>
+    <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="32" height="32" fill="#000000"/>
+
+  <g filter="url(#bloom)" shape-rendering="crispEdges">
+    <!-- chevron, drawn as square pixels rather than a smooth stroke -->
+    <rect x="6"  y="8"  width="4" height="4" fill="#5cff7a"/>
+    <rect x="10" y="12" width="4" height="4" fill="#5cff7a"/>
+    <rect x="14" y="16" width="4" height="4" fill="#5cff7a"/>
+    <rect x="10" y="20" width="4" height="4" fill="#5cff7a"/>
+    <rect x="6"  y="24" width="4" height="4" fill="#5cff7a"/>
+    <!-- cursor -->
+    <rect x="21" y="20" width="5" height="8" fill="#ffc457"/>
+  </g>
+</svg>
