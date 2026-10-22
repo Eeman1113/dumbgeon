@@ -28,6 +28,32 @@ export function isSupported(): boolean {
   return resolveNamespace() !== null;
 }
 
+export type Platform = "chrome-desktop" | "chrome-mobile" | "ios" | "safari" | "other";
+
+/**
+ * Which browser is this, for the purposes of telling the user something true.
+ *
+ * Chrome's Prompt API is desktop-only, and Safari exposes no on-device model
+ * to web pages at all, so showing everyone the same "enable these flags"
+ * instructions sends most visitors on an errand that cannot succeed.
+ */
+export function detectPlatform(): Platform {
+  if (typeof navigator === "undefined") return "other";
+  const ua = navigator.userAgent;
+
+  // iPadOS reports as Macintosh, so check for touch as well.
+  const isIOS =
+    /iPhone|iPad|iPod/.test(ua) ||
+    (/Macintosh/.test(ua) && typeof document !== "undefined" && navigator.maxTouchPoints > 1);
+  if (isIOS) return "ios";
+
+  const isChrome = /Chrome\//.test(ua) && !/Edg\//.test(ua) && !/OPR\//.test(ua);
+  if (isChrome) return /Android/.test(ua) ? "chrome-mobile" : "chrome-desktop";
+
+  if (/Safari\//.test(ua)) return "safari";
+  return "other";
+}
+
 export async function checkAvailability(): Promise<NanoStatus> {
   const ns = resolveNamespace();
   if (!ns) return { kind: "missing" };

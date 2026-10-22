@@ -1017,3 +1017,87 @@ body {
   white-space: nowrap;
   border: 0;
 }
+
+/* ---------------------------------------------------------------------------
+   Long unbreakable strings.
+
+   The chrome://flags addresses have no spaces, and nothing was telling them
+   to wrap, so on a phone they ran straight off the side of the screen and
+   took the whole layout with them.
+   --------------------------------------------------------------------------- */
+
+code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  /* Monospace fallbacks render large; pull them back to the surrounding text. */
+  font-size: 0.82em;
+  color: var(--amber);
+  text-shadow: var(--bloom-amber);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: none;
+}
+
+.panel,
+.panel-body,
+.panel-steps,
+.panel-steps li,
+.panel-title,
+.narration,
+.utterance,
+.box-value,
+.carry-list li,
+.menu-opening {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* A stray overflow anywhere must not make the whole page scroll sideways. */
+.centered,
+.shell,
+.reader,
+.boot {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.panel-actions {
+  width: 100%;
+}
+
+@media (max-width: 560px) {
+  /* Stacked, full-width controls are far easier to hit than wrapped inline ones. */
+  .panel-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .panel-actions .block-button {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .panel-actions .key-button {
+    justify-content: center;
+    padding: 0.5rem 0;
+  }
+
+  .block-button {
+    font-size: 0.55rem;
+    line-height: 1.6;
+    padding: 0.9rem 1rem;
+  }
+
+  .panel-steps {
+    padding-left: 1.1rem;
+  }
+
+  .panel-steps li {
+    margin-bottom: 0.6rem;
+  }
+
+  code {
+    font-size: 0.78em;
+  }
+}

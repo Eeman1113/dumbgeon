@@ -78,6 +78,21 @@ export default function Page() {
   useEffect(() => {
     // The BIOS crawl is a cold-start flourish, not a reload tax.
     if (sessionStorage.getItem("dumbgeon.booted")) setBooting(false);
+
+    // The gate screens are unreachable on a machine where the model works,
+    // so ?gate=missing / ?gate=download make them testable.
+    const forced = new URLSearchParams(location.search).get("gate");
+    if (forced === "missing" || forced === "ios" || forced === "safari" || forced === "chrome-mobile") {
+      setBooting(false);
+      setStatus({ kind: "missing" });
+      return;
+    }
+    if (forced === "download") {
+      setBooting(false);
+      setStatus({ kind: "needs-download" });
+      return;
+    }
+
     checkAvailability().then(setStatus);
     const existing = loadGame();
     if (existing) setSaved(existing);
