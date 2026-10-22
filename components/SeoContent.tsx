@@ -12,7 +12,21 @@ import { SITE } from "@/lib/site";
  */
 export default function SeoContent() {
   return (
-    <section className="sr-only" aria-label="About this game">
+    <section
+      className="sr-only"
+      aria-label="About this game"
+      // Inline as well as in the stylesheet: if the CSS is slow or fails to
+      // load, this block must not flash up over the game.
+      style={{
+        position: "absolute",
+        width: 1,
+        height: 1,
+        overflow: "hidden",
+        clip: "rect(0 0 0 0)",
+        clipPath: "inset(50%)",
+        whiteSpace: "nowrap",
+      }}
+    >
       <h1>dumbgeon — a free AI text adventure that runs entirely in your browser</h1>
 
       <p>{SITE.description}</p>

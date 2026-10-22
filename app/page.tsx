@@ -31,6 +31,7 @@ import {
   type Turn,
 } from "@/lib/game";
 import { drawClock, drawThreat } from "@/lib/director";
+import { echoesHistory, echoesInput, REDIRECT, sameOpening } from "@/lib/echo";
 import { RotateCcw } from "lucide-react";
 import type { Scenario } from "@/lib/scenarios";
 import {
@@ -267,16 +268,39 @@ export default function Page() {
           turnIndex,
         );
 
-        const raw = await streamPrompt(
-          session,
-          buildNarrationPrompt(base, action, roll),
-          // Scrub while streaming too, so a leaked label never flashes on screen.
-          (text) => setStreaming(cleanNarration(text)),
-          controller.signal,
-        );
+        const recent = base.turns.slice(-3).map((turn) => turn.narration);
 
+        const tell = async (redirect?: string) =>
+          cleanNarration(
+            await streamPrompt(
+              session,
+              buildNarrationPrompt(base, action, roll, redirect),
+              // Scrub while streaming too, so a leaked label never flashes up.
+              (text) => setStreaming(cleanNarration(text)),
+              controller.signal,
+            ),
+          );
+
+        let narration = await tell();
         if (controller.signal.aborted) return;
-        const narration = cleanNarration(raw);
+
+        // One retry if the reply parrots the player or reuses recent phrasing.
+        // Prompting alone does not fix restatement on a model this size.
+        const repetitive =
+          echoesInput(narration, action) ||
+          echoesHistory(narration, recent) ||
+          sameOpening(narration, recent);
+
+        if (repetitive) {
+          setStreaming("");
+          const second = await tell(REDIRECT);
+          if (controller.signal.aborted) return;
+          // Keep the retry only if it is actually less repetitive.
+          if (second && !echoesInput(second, action) && !echoesHistory(second, recent)) {
+            narration = second;
+          }
+        }
+
         if (!narration) throw new Error("The narrator returned nothing.");
 
         const turn: Turn = {

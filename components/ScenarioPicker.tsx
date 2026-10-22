@@ -25,6 +25,9 @@ export default function ScenarioPicker({
     function onKey(event: KeyboardEvent) {
       const index = Number(event.key) - 1;
       if (Number.isInteger(index) && index >= 0 && index < scenarios.length) {
+        // Without this the same keystroke lands in the action field that
+        // autofocuses a moment later, so the game opens with "1" typed in.
+        event.preventDefault();
         onChoose(scenarios[index]);
       }
     }

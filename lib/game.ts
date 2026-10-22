@@ -121,6 +121,7 @@ PLAY ALONG
 - Let ordinary actions simply work. A moment can pass with nothing going wrong.
 - When a line tells you to make something happen, weave that event into the prose as story. Otherwise just answer what the player did.
 - Keep names, places and objects consistent with the FACTS.
+- Start from what happens next. Never retell the player's input back to them.
 
 AVOID
 - "you feel", "you sense", "a sense of", "the air grows", "something is wrong", "little do you know".
@@ -195,6 +196,8 @@ export function buildNarrationPrompt(
   game: Game,
   action: string,
   roll: Resolution,
+  /** Appended on a retry when the first reply repeated itself. */
+  redirect?: string,
 ): string {
   const director = game.director;
   const recent = game.turns
@@ -236,7 +239,7 @@ export function buildNarrationPrompt(
   if (roll.cls === "declare") {
     lines.push(
       "",
-      "The player is stating something about the world. It is true. Accept it without question and show it being true.",
+      "The player is adding something to the world. It is true and has always been true. Do not repeat it back to them. Show it mattering right now: someone speaks or acts because of it, or it changes what the player does next.",
     );
   } else if (!quiet) {
     lines.push("", `What happens: ${outcomeLine(roll.outcome)}${roll.costLine}`);
@@ -249,6 +252,7 @@ export function buildNarrationPrompt(
   if (style) lines.push("", style);
 
   lines.push("", lengthLine(game.profile));
+  if (redirect) lines.push(redirect);
 
   return lines.join("\n");
 }
