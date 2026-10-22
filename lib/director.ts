@@ -12,6 +12,7 @@
  */
 
 export type Beat =
+  | "QUIET"      // the default: answer the player, let the scene breathe
   | "SETUP"      // orient; show a trace of the threat, not the threat
   | "BITE"       // the threat touches the player directly, first time
   | "COMPLICATE" // a cost, an obstacle, a price
@@ -23,7 +24,7 @@ export type Beat =
 
 export type Outcome = "SUCCESS" | "PARTIAL" | "COST" | "FAIL";
 
-export type RiskClass = "observe" | "talk" | "act" | "risk";
+export type RiskClass = "observe" | "talk" | "act" | "risk" | "declare";
 
 export interface Threat {
   /** A definite name, reused verbatim every turn so it stays one character. */
@@ -49,6 +50,12 @@ export interface Promise_ {
 export interface Director {
   beat: Beat;
   beatTurns: number;
+  /** Turns since the director last forced an event. */
+  quietRun: number;
+  /** How many quiet turns to allow before the next one. Re-rolled each time. */
+  nextEventIn: number;
+  /** Where we are in the escalation chain, resumed between quiet stretches. */
+  chainBeat: Beat;
   /** 0-10. Drives failure odds and beat jumps. */
   tension: number;
   /** 0-2. Each loop raises the tension floor and picks a harder threat move. */
@@ -183,6 +190,9 @@ export function newDirector(threat: Threat, clock: string, secret: string): Dire
   return {
     beat: "SETUP",
     beatTurns: 0,
+    quietRun: 0,
+    nextEventIn: 2,
+    chainBeat: "SETUP",
     tension: 1,
     arc: 0,
     threat,
@@ -205,7 +215,8 @@ function clamp(value: number, min: number, max: number): number {
 
 /** BITE, REVERSE, PAYOFF and BREATH are single punches — held longer they repeat. */
 const MAX_TURNS: Record<Beat, number> = {
-  SETUP: 2,
+  QUIET: 1,
+  SETUP: 1,
   BITE: 1,
   COMPLICATE: 2,
   REVERSE: 1,
@@ -216,6 +227,7 @@ const MAX_TURNS: Record<Beat, number> = {
 };
 
 const CHAIN: Record<Beat, Beat> = {
+  QUIET: "COMPLICATE",
   SETUP: "BITE",
   BITE: "COMPLICATE",
   COMPLICATE: "REVERSE",
@@ -227,6 +239,7 @@ const CHAIN: Record<Beat, Beat> = {
 };
 
 const TENSION_BY_BEAT: Record<Beat, number> = {
+  QUIET: -1,
   SETUP: 0,
   BITE: 2,
   COMPLICATE: 1,
@@ -254,9 +267,15 @@ const PROMISE_TEXT: Partial<Record<Beat, (d: Director) => string>> = {
 const MAX_PROMISES = 3;
 
 /**
- * Advance the story one beat. Guard order is the design: mercy and payoff
- * outrank the normal chain, so no player is ground down and nothing the
- * director raises is ever forgotten.
+ * Advance the story.
+ *
+ * The director's job is pacing, not control. Most turns it stays silent and
+ * the narrator simply answers the player — that quiet is where conversation,
+ * character and the player's own ideas live. Every few turns it steps in with
+ * one directed beat, then gets out of the way again.
+ *
+ * Forcing an event every single turn is what makes an improvised story feel
+ * like a treadmill. The rhythm below is the fix.
  */
 export function advance(
   d: Director,
@@ -266,78 +285,83 @@ export function advance(
 ): Director {
   const next: Director = { ...d, promises: [...d.promises] };
 
+  const wasDirected = d.beat !== "QUIET";
+
+  // Tension decays while nothing is happening and builds when it does.
+  const drift = wasDirected ? TENSION_BY_BEAT[d.beat] : -1;
   next.tension = clamp(
-    d.tension + TENSION_BY_BEAT[d.beat] + TENSION_BY_OUTCOME[outcome],
-    d.arc * 2, // the floor rises each arc: no returning to calm
+    d.tension + drift + TENSION_BY_OUTCOME[outcome],
+    d.arc * 2,
     10,
   );
 
+  // The clock only moves on directed beats, so the deadline is ambient
+  // pressure rather than a metronome counting down every reply.
   const tick =
     (d.beat === "SQUEEZE" || d.beat === "CONFRONT" ? 1 : 0) +
-    (outcome === "FAIL" ? 1 : 0) -
-    (d.beat === "BREATH" ? 1 : 0); // a win buys back a little time
+    (outcome === "FAIL" && wasDirected ? 1 : 0) -
+    (d.beat === "BREATH" ? 1 : 0);
 
   next.clock = {
     ...d.clock,
     remaining: clamp(d.clock.remaining - tick, 0, d.clock.total),
   };
 
-  next.beatTurns = d.beatTurns + 1;
+  if (wasDirected) {
+    // Resolve the promise belonging to the beat just played.
+    if (d.beat === "PAYOFF" || d.beat === "CONFRONT") next.promises.shift();
 
-  // Resolve the promise belonging to the beat just PLAYED. Doing this on the
-  // beat being entered left PAYOFF unable to clear the promise that summoned
-  // it, so the guard below re-fired forever and the story froze.
-  if (d.beat === "PAYOFF" || d.beat === "CONFRONT") {
-    next.promises.shift();
-  }
+    next.beatTurns = d.beatTurns + 1;
 
-  const oldest = next.promises[0];
-  const promiseAge = oldest ? turnIndex - oldest.openedOn : 0;
+    // Multi-turn beats finish before we hand control back to the quiet.
+    if (next.beatTurns < MAX_TURNS[d.beat]) {
+      return next;
+    }
 
-  let beat: Beat;
-  if (next.clock.remaining <= 0 && d.arc >= 2) {
-    beat = "CONFRONT"; // endgame
-  } else if (healthFraction <= 0.35 && turnIndex - d.lastBreath >= 3) {
-    beat = "BREATH"; // mercy: a death spiral loses players faster than anything
-  } else if (next.clock.remaining <= 0 && d.beat !== "CONFRONT") {
-    beat = "CONFRONT";
-  } else if (next.tension >= 8 && (d.beat === "COMPLICATE" || d.beat === "REVERSE")) {
-    beat = "SQUEEZE";
-  } else if (next.beatTurns >= MAX_TURNS[d.beat]) {
-    beat = CHAIN[d.beat];
-  } else if (promiseAge >= 6 && d.beat !== "PAYOFF") {
-    // Safety net only: it fires when a beat would otherwise idle, so it can
-    // never outrank the escalating chain and starve the climax.
-    beat = "PAYOFF";
-  } else {
-    beat = d.beat;
-  }
-
-  if (beat !== d.beat) {
-    next.beatTurns = 0;
+    // Done. Advance the chain and go quiet for a while.
     if (d.beat === "BREATH") next.arc = Math.min(2, d.arc + 1);
-    if (beat === "BREATH") next.lastBreath = turnIndex;
+    if (d.beat === "BREATH") next.lastBreath = turnIndex;
+    next.chainBeat = CHAIN[d.beat];
+    next.beat = "QUIET";
+    next.beatTurns = 0;
+    next.quietRun = 0;
+    // Randomised so the pacing never feels metronomic.
+    next.nextEventIn = 2 + Math.floor(Math.random() * 3);
+    return next;
+  }
 
-    // Surviving a confrontation before the endgame buys a new deadline, so a
-    // spent clock cannot pin the story on CONFRONT for the rest of the game.
-    if (d.beat === "CONFRONT" && next.clock.remaining <= 0 && next.arc < 2) {
-      next.clock = { ...next.clock, remaining: Math.ceil(next.clock.total / 2) };
-    }
+  // --- we are quiet -------------------------------------------------------
+  next.quietRun = d.quietRun + 1;
 
-    // Promises are opened by the director, because it knows when it caused one.
-    const makePromise = PROMISE_TEXT[beat];
-    if (makePromise && next.promises.length < MAX_PROMISES) {
-      const text = makePromise(next);
-      if (!next.promises.some((p) => p.text === text)) {
-        next.promises.push({ id: `${turnIndex}-${beat}`, text, openedOn: turnIndex });
-      }
+  // Emergencies still interrupt the quiet.
+  if (healthFraction <= 0.3 && turnIndex - d.lastBreath >= 4) {
+    next.beat = "BREATH";
+    next.beatTurns = 0;
+    next.quietRun = 0;
+    next.lastBreath = turnIndex;
+    return next;
+  }
+
+  if (next.quietRun < d.nextEventIn) {
+    next.beat = "QUIET";
+    return next;
+  }
+
+  // Time for the next directed beat.
+  const beat = next.clock.remaining <= 0 && d.arc >= 2 ? "CONFRONT" : d.chainBeat;
+  next.beat = beat;
+  next.beatTurns = 0;
+  next.quietRun = 0;
+
+  const makePromise = PROMISE_TEXT[beat];
+  if (makePromise && next.promises.length < MAX_PROMISES) {
+    const text = makePromise(next);
+    if (!next.promises.some((p) => p.text === text)) {
+      next.promises.push({ id: `${turnIndex}-${beat}`, text, openedOn: turnIndex });
     }
   }
 
-  next.beat = beat;
-
-  // The story ends when the final confrontation has played out.
-  if (next.beat === "CONFRONT" && next.arc >= 2 && next.beatTurns >= 1) {
+  if (beat === "CONFRONT" && next.arc >= 2) {
     next.ended = healthFraction <= 0 ? "lost" : "won";
   }
 
@@ -356,12 +380,16 @@ function cap(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-export function directive(d: Director): string {
+export function directive(d: Director): string | null {
   const threat = d.threat;
   const move = threat.moves[clamp(d.arc, 0, 2)];
   const oldest = d.promises[0]?.text ?? "the thing you came here for";
 
   switch (d.beat) {
+    case "QUIET":
+      // No directive. The narrator just answers the player.
+      return null;
+
     case "SETUP":
       return "Show one physical detail here that someone left in a hurry. Name it. Do not explain it.";
 
@@ -447,7 +475,31 @@ const PATTERNS: [RiskClass, RegExp][] = [
   ],
 ];
 
+/**
+ * Statements rather than actions: "Sweta is your wife", "you have a sword",
+ * "there is a door here". The player is adding to the world, not asking to
+ * do something — and the whole appeal of this kind of game is that the world
+ * says yes. These never roll and never fail.
+ */
+const DECLARATION = [
+  /^(?:[\w' -]{1,40}\s+(?:is|are|was|were)\s+)/i,
+  /^(?:you|i)\s+(?:are|were|have|had|own|know|remember)\b/i,
+  /^there\s+(?:is|are|was|were)\b/i,
+  /^(?:your|my|his|her|their)\s+[\w' -]{1,30}\s+(?:is|are|was|were)\b/i,
+  /^(?:it|this|that)\s+(?:is|was)\b/i,
+];
+
+function isDeclaration(action: string): boolean {
+  const text = action.trim();
+  // An imperative with a verb up front is an action, however it is phrased.
+  if (/^(?:go|walk|run|take|grab|open|close|look|attack|ask|tell|say|use|put|give|climb|jump|enter|leave|search|read|wait|hide|follow|push|pull|throw|cast|draw|light|kill|talk)\b/i.test(text)) {
+    return false;
+  }
+  return DECLARATION.some((pattern) => pattern.test(text));
+}
+
 export function classify(action: string): RiskClass {
+  if (isDeclaration(action)) return "declare";
   for (const [cls, pattern] of PATTERNS) {
     if (pattern.test(action)) return cls;
   }
@@ -456,7 +508,8 @@ export function classify(action: string): RiskClass {
 
 /** Thresholds on a 0-99 roll; lower is better. [SUCCESS, PARTIAL, COST] */
 const TABLE: Record<RiskClass, [number, number, number]> = {
-  observe: [70, 95, 100], // observing never hard-fails
+  declare: [100, 100, 100], // the player's own additions always land
+  observe: [92, 99, 100],   // looking at things is not a gamble
   talk: [45, 75, 90],
   act: [40, 70, 85],
   risk: [25, 50, 70],
@@ -501,11 +554,18 @@ export function resolveAction(
   turnIndex: number,
 ): Resolution {
   const cls = classify(action);
+  const free = { cls, outcome: "SUCCESS" as Outcome, harm: 0, itemLost: null, costLine: "" };
+
+  // The player's own additions to the world are always true.
+  if (cls === "declare") return free;
 
   // Never punish before stakes exist, and never during relief.
-  if (d.beat === "SETUP" || d.beat === "BREATH" || d.beat === "PAYOFF") {
-    return { cls, outcome: "SUCCESS", harm: 0, itemLost: null, costLine: "" };
-  }
+  if (d.beat === "SETUP" || d.beat === "BREATH" || d.beat === "PAYOFF") return free;
+
+  // On a quiet turn, only something genuinely dangerous can go wrong. Letting
+  // ordinary actions simply work is what makes the game feel permissive
+  // instead of adversarial.
+  if (d.beat === "QUIET" && cls !== "risk") return free;
 
   const rng = mulberry32(hash(`${turnIndex}:${action}:${d.nonce}`));
   let roll = Math.floor(rng() * 100);

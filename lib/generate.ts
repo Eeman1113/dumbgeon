@@ -17,44 +17,65 @@ import type { Scenario } from "./scenarios";
  * a small model asked for "a scenario" returns the same dark forest every time.
  */
 
+/**
+ * Every world used to be a variation on dread, which made four scenarios feel
+ * like one. These tables span genre and mood on purpose: a heist, a wizard, a
+ * ferry crossing and a haunted exchange should not share a register.
+ */
 const PLACES = [
-  "a drained reservoir", "a night ferry", "a radio observatory", "a seed vault",
-  "a funicular railway", "a salt mine", "a lighthouse keeper's cottage",
-  "a municipal swimming baths", "a tram depot", "a customs house",
-  "a sleeper berth on a mail train", "a botanical glasshouse", "a quarantine island",
-  "a grain silo", "an abandoned ski station", "a telephone exchange",
-  "a chalk quarry", "a cold-storage warehouse", "a canal lock keeper's hut",
-  "a mountain weather station", "a dry dock", "a peat bog cutting",
-  "a church crypt converted to an archive", "a ferry terminal waiting room",
-  "a pumping station", "a disused observatory dome", "a border checkpoint",
-  "a fish cannery", "a sanatorium solarium", "an ice house",
-  "a cable car station", "a printing works", "a model village",
-  "a reservoir valve tower", "a shipping office", "a glass eye factory",
+  // fantasy
+  "a ruined city on the old road", "a wizard's tower let to students",
+  "a border inn on a trade route", "a flooded temple in the marsh",
+  "a dragon's abandoned terrace", "a market city at festival",
+  // science fiction
+  "a generation ship's farm deck", "a mining station above a gas giant",
+  "a terraforming outpost", "a derelict freighter under salvage claim",
+  // mundane and strange
+  "a night ferry", "a radio observatory", "a seed vault",
+  "a funicular railway", "a municipal swimming baths", "a tram depot",
+  "a botanical glasshouse", "a telephone exchange", "a lighthouse cottage",
+  "a grain silo", "an abandoned ski station", "a customs house",
+  "a cold-storage warehouse", "a mountain weather station", "a dry dock",
+  "a chalk quarry", "a printing works", "a border checkpoint",
+  "a fish cannery", "a cable car station", "a drained reservoir",
 ];
 
-const WRONGNESS = [
+/** What is actually going on. Not all of it is sinister. */
+const HOOKS = [
+  "a job is on offer that pays far too well",
+  "someone here owes the player a favour and would rather not pay it",
+  "a door has appeared that was not there yesterday",
+  "a rumour is worth money to the right buyer",
   "something is being counted that should not be countable",
-  "time is running at the wrong rate in one room",
-  "the building remembers a previous occupant too well",
-  "a debt is being collected",
-  "something is growing that was never planted",
   "the records disagree with the people",
   "an arrival is expected and long overdue",
   "the machinery is still running with nobody to run it",
   "someone has been quietly substituted",
+  "a debt is being collected",
+  "two factions both think the player works for them",
+  "there is treasure here and the map is wrong",
+  "a festival is about to start and someone is missing",
   "the way out is not where it was",
-  "a sound is coming from the wrong direction",
+  "something is growing that was never planted",
+  "a contract was signed in the player's name by someone else",
   "the weather indoors does not match the weather outside",
-  "an instrument is reading something it cannot measure",
-  "a door has been bricked up recently from the inside",
-  "the water is warmer than it has any right to be",
-  "the lights come on in rooms nobody has entered",
   "a name keeps appearing that belongs to no one here",
 ];
 
 const TONES = [
-  "quiet dread", "bureaucratic unease", "folk-horror", "cold industrial",
-  "melancholy", "wrong-fairytale", "clinical", "maritime gloom",
+  "wry and adventurous", "warm but uneasy", "pulpy and fast",
+  "quiet dread", "bureaucratic comedy", "folk-horror", "cold industrial",
+  "melancholy", "swashbuckling", "deadpan and absurd", "clinical",
+  "hopeful", "noir",
+];
+
+const ROLES = [
+  "a wizard with more confidence than training", "a courier who reads the parcels",
+  "a salvage diver", "a junior inspector", "a thief between jobs",
+  "a ship's cook", "a cartographer", "a debt collector who has lost their nerve",
+  "a lighthouse keeper's replacement", "a travelling physician",
+  "a night watchman", "a translator", "a smuggler", "a retired soldier",
+  "an apprentice who has been left in charge",
 ];
 
 function pick<T>(list: T[]): T {
@@ -79,21 +100,22 @@ export const SCENARIO_EXAMPLES = [
   {
     role: "user" as const,
     content: `Setting: a chalk quarry
-Tone: bureaucratic unease
-What is really going on, which the player cannot know yet: something is being counted that should not be countable
+The player is: a junior inspector
+Tone: bureaucratic comedy
+Going on behind the scenes, which the player cannot know yet: something is being counted that should not be countable
 
-The OPENING line shows one small physical symptom of that, and names no cause.
+Write the opening of an adventure. Tell the player who they are and drop them straight into the situation. Hint at the hidden thing with one concrete detail; never explain it.
 
 Reply with these four lines:
 TITLE: <2 to 3 words>
-OPENING: <two sentences, "you", present tense>
+OPENING: <three sentences. Start "You are". Say who they are and where. Then one thing happening right now.>
 PLACE: <short noun phrase>
 CARRYING: <two ordinary objects, comma separated>`,
   },
   {
     role: "assistant" as const,
     content: `TITLE: The Tally Hut
-OPENING: The chalk dust has settled on everything in the hut except the ledger, which lies open at today's date. Four hundred and nine, says the last line, in handwriting that matches yours.
+OPENING: You are a junior inspector at the chalk quarry, two days into a count nobody wanted you to make. The dust has settled on everything in the tally hut except the ledger, which lies open at today's date. The foreman is outside now, waiting for you to come out and agree with him.
 PLACE: tally hut
 CARRYING: a carpenter's pencil, a tin of throat lozenges`,
   },
@@ -107,10 +129,16 @@ export interface Seed {
   place: string;
   wrongness: string;
   tone: string;
+  role: string;
 }
 
 export function drawSeed(): Seed {
-  return { place: pick(PLACES), wrongness: pick(WRONGNESS), tone: pick(TONES) };
+  return {
+    place: pick(PLACES),
+    wrongness: pick(HOOKS),
+    tone: pick(TONES),
+    role: pick(ROLES),
+  };
 }
 
 export function buildScenarioPrompt(seed: Seed): string {
@@ -119,14 +147,15 @@ export function buildScenarioPrompt(seed: Seed): string {
   // symptom gets a symptom. Duplicate titles are rejected in code instead of
   // being listed here, where they would act as a few-shot of what to avoid.
   return `Setting: ${seed.place}
+The player is: ${seed.role}
 Tone: ${seed.tone}
-What is really going on, which the player cannot know yet: ${seed.wrongness}
+Going on behind the scenes, which the player cannot know yet: ${seed.wrongness}
 
-The OPENING line shows one small physical symptom of that — something seen, heard or counted — and names no cause.
+Write the opening of an adventure. Tell the player who they are and drop them straight into the situation. Hint at the hidden thing with one concrete detail; never explain it.
 
 Reply with these four lines:
 TITLE: <2 to 3 words>
-OPENING: <two sentences, "you", present tense>
+OPENING: <three sentences. Start "You are". Say who they are and where. Then one thing happening right now.>
 PLACE: <short noun phrase>
 CARRYING: <two ordinary objects, comma separated>`;
 }
@@ -155,7 +184,7 @@ export function parseScenario(raw: string | null, seed: Seed, index: number): Sc
   if (!raw) return null;
 
   const name = cap(field(raw, "TITLE"), 60);
-  const opening = cap(field(raw, "OPENING"), 400);
+  const opening = cap(field(raw, "OPENING"), 520);
   const location = cap(field(raw, "PLACE"), 60);
   if (!name || !opening || !location) return null;
 
@@ -172,7 +201,7 @@ export function parseScenario(raw: string | null, seed: Seed, index: number): Sc
     // Composed, not generated. The wrongness is deliberately NOT here: handed
     // to the narrator every turn it either leaks on turn one or is ignored.
     // It goes to the director, which releases it once, on the REVERSE beat.
-    premise: `${seed.place.replace(/^an? /, "").replace(/^./, (c) => c.toUpperCase())}. Tone: ${seed.tone}.`,
+    premise: `${seed.place.replace(/^an? /, "").replace(/^./, (c) => c.toUpperCase())}. The player is ${seed.role}. Tone: ${seed.tone}.`,
     secret: seed.wrongness,
     location,
     inventory: inventory.length ? inventory : ["nothing in particular"],

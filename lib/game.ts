@@ -10,6 +10,7 @@ import {
   type Resolution,
   type Threat,
 } from "./director";
+import { lengthLine, newProfile, observe, styleLine, type PlayerProfile } from "./player";
 import type { Scenario } from "./scenarios";
 
 export const MAX_HEALTH = 20;
@@ -44,6 +45,7 @@ export interface Turn {
   stateBefore: WorldState;
   directorBefore: Director;
   memoryBefore: Memory;
+  profileBefore: PlayerProfile;
 }
 
 export interface Game {
@@ -54,6 +56,8 @@ export interface Game {
   state: WorldState;
   director: Director;
   memory: Memory;
+  /** How this person plays, learned from their own inputs. */
+  profile: PlayerProfile;
 }
 
 export function newGame(scenario: Scenario, threat: Threat, clock: string): Game {
@@ -64,6 +68,7 @@ export function newGame(scenario: Scenario, threat: Threat, clock: string): Game
   };
   const director = newDirector(threat, clock, scenario.secret);
   const memory: Memory = { entries: [], earlier: null, names: [] };
+  const profile = newProfile();
 
   return {
     scenarioId: scenario.id,
@@ -72,6 +77,7 @@ export function newGame(scenario: Scenario, threat: Threat, clock: string): Game
     state,
     director,
     memory,
+    profile,
     turns: [
       {
         id: "opening",
@@ -80,6 +86,7 @@ export function newGame(scenario: Scenario, threat: Threat, clock: string): Game
         stateBefore: state,
         directorBefore: director,
         memoryBefore: memory,
+        profileBefore: profile,
       },
     ],
   };
@@ -90,27 +97,35 @@ export function newGame(scenario: Scenario, threat: Threat, clock: string): Game
 // ---------------------------------------------------------------------------
 
 /**
- * Two buckets, flat bullets, every line imperative.
+ * The narrator.
  *
- * The old prompt was all restraint — seven prohibitions and nothing that
- * caused an event — so the model did the only thing left to it and described
- * the room. These rules make something happen, and the banned list is limited
- * to exact phrases the model can match against its own output rather than
- * stylistic judgements it cannot make.
+ * The previous version demanded an event every single reply — "change
+ * something and name the change", "one action by someone who is not the
+ * player". That turns an improvised story into a treadmill where a
+ * complication detonates after every sentence the player types.
+ *
+ * Most turns should simply answer the player. When the director wants an
+ * event it says so on a MUST line; the rest of the time the narrator is free
+ * to let a scene be a scene — dialogue, a small discovery, a quiet moment.
+ * Permissiveness is the point: whatever the player says is true, becomes true.
  */
-export const NARRATOR_SYSTEM = `You narrate a second-person adventure. You write 2 to 4 sentences per turn. Never more.
+export const NARRATOR_SYSTEM = `You narrate an improvised adventure. The player types anything they like and you continue the story.
 
-EVERY REPLY MUST:
-- Change one of these, and name the change: where the player is, what they hold, what they know, or what is about to hurt them.
-- Contain one action by someone or something that is not the player. The world moves on its own.
-- Obey the OUTCOME line. If it says the action fails or costs something, it fails and it costs.
-- Obey the MUST line. That is the event this turn exists to deliver.
-- End on a fact: an object, a position, a spoken line, a sound with a source. End with a period.
+VOICE
+- Second person, present tense. 2 to 4 sentences.
+- Plain, direct language. Real things over atmosphere.
+- People talk. Put speech in quotation marks.
 
-NEVER WRITE THESE WORDS:
-- "you feel", "you sense", "a sense of", "unease", "a chill", "shiver", "the air grows", "something is wrong", "deafening silence".
-- "seems", "appears to", "somehow", "almost", "as if". State what is true.
-- Never speak as the player, offer choices, or mention rules.`;
+PLAY ALONG
+- Whatever the player states is true. If they name a person, that person exists and has always existed. If they claim a fact about the world or themselves, accept it and build on it.
+- Let ordinary actions simply work. A moment can pass with nothing going wrong.
+- When a line tells you to make something happen, weave that event into the prose as story. Otherwise just answer what the player did.
+- Keep names, places and objects consistent with the FACTS.
+
+AVOID
+- "you feel", "you sense", "a sense of", "the air grows", "something is wrong", "little do you know".
+- Asking the player what they do, or offering them a list of choices. Never end on a question.
+- Repeating any instruction back. Write only the story itself.`;
 
 /** One worked example teaches more than any rule. Prefilled once per session. */
 export const NARRATOR_EXAMPLES = [
@@ -138,6 +153,21 @@ Write 2 to 4 sentences. Obey OUTCOME and MUST.`,
   },
 ];
 
+/**
+ * Small models sometimes echo an instruction label straight into the prose
+ * ("MUST: the wrench becomes lighter"). Rewording helps but does not fully
+ * stop it, so the output is scrubbed as well.
+ */
+const LEAKED =
+  /(^|\n)[ \t]*(?:MUST|OUTCOME|FACTS?|NAMES? in play|Pressure|PLAYER INPUT|Recently|In this reply[^:]*|What happens)[ \t]*:[^\n]*/gi;
+
+export function cleanNarration(text: string): string {
+  return text
+    .replace(LEAKED, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function condition(health: number): string {
   const fraction = health / MAX_HEALTH;
   if (fraction >= 1) return "unhurt";
@@ -161,38 +191,69 @@ function factLines(memory: Memory): string {
  */
 const HISTORY_TURNS = 2;
 
-export function buildNarrationPrompt(game: Game, action: string, roll: Resolution): string {
+export function buildNarrationPrompt(
+  game: Game,
+  action: string,
+  roll: Resolution,
+): string {
   const director = game.director;
   const recent = game.turns
     .slice(-HISTORY_TURNS)
     .map((turn) => (turn.action ? `> ${turn.action}\n${turn.narration}` : turn.narration))
     .join("\n\n");
 
-  // OUTCOME and MUST go last, immediately before the write instruction:
-  // recency dominates instruction-following on a small model.
-  return `${game.premise}
+  const names = [...game.memory.names, ...game.profile.invented];
+  const must = directive(director);
+  const quiet = must === null;
 
-FACTS (never contradict these):
-${factLines(game.memory)}
-${game.memory.names.length ? `\nNAMES in play: ${game.memory.names.join(", ")}` : ""}
+  const lines = [
+    game.premise,
+    "",
+    "FACTS (keep these true):",
+    factLines(game.memory),
+  ];
 
-Where: ${game.state.location}
-Carrying: ${game.state.inventory.join(", ") || "nothing"}
-Condition: ${condition(game.state.health)}
-Pressure: ${director.threat.name} wants ${director.threat.wants}. ${clockPhrase(director.clock)}
+  if (names.length) lines.push("", `NAMES in play: ${[...new Set(names)].join(", ")}`);
 
-Recently:
-${recent}
+  lines.push(
+    "",
+    `Where: ${game.state.location}`,
+    `Carrying: ${game.state.inventory.join(", ") || "nothing"}`,
+    `Condition: ${condition(game.state.health)}`,
+  );
 
-PLAYER ACTION: ${action}
+  // The threat is only named on turns where it is actually doing something.
+  // Repeating it every turn made the narrator keep circling back to it.
+  if (!quiet) {
+    lines.push(
+      `Pressure: ${director.threat.name} wants ${director.threat.wants}. ${clockPhrase(director.clock)}`,
+    );
+  }
 
-OUTCOME: ${outcomeLine(roll.outcome)}${roll.costLine}
-MUST: ${directive(director)}
+  lines.push("", "Recently:", recent, "", `PLAYER INPUT: ${action}`);
 
-Write 2 to 4 sentences. Obey OUTCOME and MUST.`;
+  // A declaration is the player adding to the world, not attempting anything.
+  if (roll.cls === "declare") {
+    lines.push(
+      "",
+      "The player is stating something about the world. It is true. Accept it without question and show it being true.",
+    );
+  } else if (!quiet) {
+    lines.push("", `What happens: ${outcomeLine(roll.outcome)}${roll.costLine}`);
+  }
+
+  if (must) lines.push(`In this reply, make this happen: ${must}`);
+
+  // Adaptation goes last, where a small model weights it most.
+  const style = styleLine(game.profile);
+  if (style) lines.push("", style);
+
+  lines.push("", lengthLine(game.profile));
+
+  return lines.join("\n");
 }
 
-export { resolveAction, advance };
+export { resolveAction, advance, observe };
 
 // ---------------------------------------------------------------------------
 // The bookkeeper

@@ -16,11 +16,13 @@ import {
   BOOKKEEPER_SYSTEM,
   buildDeltaPrompt,
   buildNarrationPrompt,
+  cleanNarration,
   loadGame,
   MAX_HEALTH,
   NARRATOR_EXAMPLES,
   NARRATOR_SYSTEM,
   newGame,
+  observe,
   parseDelta,
   remember,
   resolveAction,
@@ -237,7 +239,8 @@ export default function Page() {
    * the two jobs apart is what stops a small model losing track of inventory.
    */
   const resolve = useCallback(
-    async (base: Game, action: string) => {
+    async (initial: Game, action: string) => {
+      let base = initial;
       setProblem(null);
       setPendingAction(action);
       setStreaming("");
@@ -252,6 +255,10 @@ export default function Page() {
         // The verdict is decided here, in TypeScript, before the model writes
         // a word. The narrator is told what happened and dramatises it; it is
         // never asked to judge whether an action should work.
+        // Learn how this person plays before building the prompt, so the
+        // adaptation applies to the turn they just took.
+        base = { ...base, profile: observe(base.profile, action) };
+
         const roll = resolveAction(
           base.director,
           base.state.inventory,
@@ -260,14 +267,16 @@ export default function Page() {
           turnIndex,
         );
 
-        const narration = await streamPrompt(
+        const raw = await streamPrompt(
           session,
           buildNarrationPrompt(base, action, roll),
-          setStreaming,
+          // Scrub while streaming too, so a leaked label never flashes on screen.
+          (text) => setStreaming(cleanNarration(text)),
           controller.signal,
         );
 
         if (controller.signal.aborted) return;
+        const narration = cleanNarration(raw);
         if (!narration) throw new Error("The narrator returned nothing.");
 
         const turn: Turn = {
@@ -277,6 +286,7 @@ export default function Page() {
           stateBefore: base.state,
           directorBefore: base.director,
           memoryBefore: base.memory,
+          profileBefore: base.profile,
         };
 
         // Show the finished prose immediately; bookkeeping catches up after.
@@ -373,6 +383,7 @@ export default function Page() {
       state: last.stateBefore,
       director: last.directorBefore,
       memory: last.memoryBefore,
+      profile: last.profileBefore,
     };
     setGame(next);
     saveGame(next);
