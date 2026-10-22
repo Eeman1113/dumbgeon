@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 import CopyFlag from "./CopyFlag";
 import Wordmark from "./Wordmark";
 import { detectPlatform, type NanoStatus, type Platform } from "@/lib/nano";
@@ -22,7 +22,7 @@ export default function Gate({ status, onDownload, onRecheck }: Props) {
   useEffect(() => {
     // ?gate=ios etc. makes the per-browser branches testable from any machine.
     const forced = new URLSearchParams(location.search).get("gate");
-    const platforms: Platform[] = ["ios", "safari", "chrome-mobile", "chrome-desktop"];
+    const platforms: Platform[] = ["ios", "desktop-other", "chrome-mobile", "chrome-desktop"];
     const match = platforms.find((name) => name === forced);
     setPlatform(match ?? detectPlatform());
   }, []);
@@ -38,68 +38,102 @@ export default function Gate({ status, onDownload, onRecheck }: Props) {
   }
 
   if (status.kind === "missing" || status.kind === "error") {
-    // On a browser that can never run this, flag instructions are a wild
-    // goose chase. Say what is actually true instead.
-    const unsupported = platform === "ios" || platform === "safari" || platform === "chrome-mobile";
+    // Installing Chrome only helps on a computer: every browser on iOS is
+    // Safari's engine underneath, and Chrome for Android does not ship the
+    // on-device model. Telling a phone user to "get Chrome" would send them
+    // to install an app that still cannot run this.
+    const chromeWouldHelp = platform === "desktop-other" || platform === "other";
+    const onPhone = platform === "ios" || platform === "chrome-mobile";
 
     return (
       <div className="centered">
         <div className="panel">
           <h1 className="panel-title">
-            {unsupported ? "WRONG BROWSER" : "NO MODEL FOUND"}
+            {onPhone ? "NEEDS A COMPUTER" : chromeWouldHelp ? "NEEDS CHROME" : "NO MODEL FOUND"}
           </h1>
 
-          {unsupported ? (
+          {onPhone ? (
             <>
               <p className="panel-body">
-                <Wordmark cursor={false} /> runs its AI on your own device, and the only
-                browser that currently lets a web page do that is{" "}
-                <b>Chrome on a desktop or laptop</b>.
+                <Wordmark cursor={false} /> runs its AI <b>on your own device</b>, and the
+                only browser that gives a web page an on-device model is{" "}
+                <b>Chrome on a computer</b>.
               </p>
               <p className="panel-body">
-                {platform === "ios" || platform === "safari"
-                  ? "Safari has no on-device model available to web pages, so there is nothing to switch on here."
-                  : "Chrome for Android does not include the on-device model yet."}{" "}
-                Open this page on a computer running Chrome and it will work.
+                {platform === "ios"
+                  ? "Installing Chrome on an iPhone will not help: every browser on iOS uses Safari's engine underneath, and it has no model to offer."
+                  : "Chrome for Android does not include the on-device model yet — it is desktop only."}
+              </p>
+              <p className="panel-body">
+                Open this on a Windows, macOS or Linux machine running Chrome and it
+                works immediately.
               </p>
 
               <div className="panel-actions">
-                <CopyFlag url={SITE.url} label="COPY LINK FOR DESKTOP" />
+                <CopyFlag url={SITE.url} label="COPY LINK FOR YOUR COMPUTER" />
+              </div>
+            </>
+          ) : chromeWouldHelp ? (
+            <>
+              <p className="panel-body">
+                <Wordmark cursor={false} /> runs its AI <b>on your own device</b> — no
+                account, no key, nothing sent anywhere. It does that through the model
+                built into Chrome, which is the only browser exposing one to web pages.
+              </p>
+              <p className="panel-body">
+                You are on a computer, so this is a short fix: install Chrome, open this
+                page in it, and the game runs.
+              </p>
+
+              <div className="panel-actions">
+                <a
+                  className="block-button"
+                  href="https://www.google.com/chrome/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Download className="icon" aria-hidden="true" />
+                  GET CHROME
+                </a>
+                <CopyFlag url={SITE.url} label="COPY THIS LINK" />
               </div>
             </>
           ) : (
             <>
               <p className="panel-body">
                 <Wordmark cursor={false} /> runs entirely on your machine — no account,
-                no key, nothing sent anywhere. That needs Gemini Nano, which ships inside
-                Chrome but stays switched off until you ask for it.
+                no key, nothing sent anywhere. That needs Gemini Nano, Chrome&apos;s
+                built-in model.
               </p>
-
               <p className="panel-body">
-                Chrome will not let a web page open its own settings, so these have to be
-                pasted into the address bar yourself.
+                It ships turned on from <b>Chrome 148</b>, so the usual fix is simply to
+                update. Check <code>chrome://settings/help</code> and restart.
               </p>
 
-              <ol className="panel-steps">
-                <li>
-                  Paste <code>{PROMPT_FLAG}</code> into a new tab and set it to{" "}
-                  <b>Enabled</b>.
-                </li>
-                <li>
-                  Paste <code>{MODEL_FLAG}</code> and set it to{" "}
-                  <b>Enabled BypassPerfRequirement</b>.
-                </li>
-                <li>Restart Chrome and come back here.</li>
-              </ol>
-
-              <div className="panel-actions">
-                <CopyFlag url={PROMPT_FLAG} label="ENABLE THE MODEL" />
-                <CopyFlag url={MODEL_FLAG} label="COPY STEP 2" />
-              </div>
+              <details className="fallback">
+                <summary>On an older Chrome? Two flags turn it on.</summary>
+                <p className="panel-body">
+                  Chrome will not let a web page open its own settings, so these have to
+                  be pasted into the address bar yourself.
+                </p>
+                <ol className="panel-steps">
+                  <li>
+                    Paste <code>{PROMPT_FLAG}</code> and set it to <b>Enabled</b>.
+                  </li>
+                  <li>
+                    Paste <code>{MODEL_FLAG}</code> and set it to{" "}
+                    <b>Enabled BypassPerfRequirement</b>.
+                  </li>
+                  <li>Restart Chrome and come back here.</li>
+                </ol>
+                <div className="panel-actions">
+                  <CopyFlag url={PROMPT_FLAG} label="ENABLE THE MODEL" />
+                  <CopyFlag url={MODEL_FLAG} label="COPY STEP 2" />
+                </div>
+              </details>
 
               <p className="panel-body" style={{ marginTop: "1.25rem" }}>
-                Needs Chrome 138 or newer, about 22GB free disk and more than 4GB of video
-                memory.
+                Needs about 22GB free disk and more than 4GB of video memory.
               </p>
             </>
           )}

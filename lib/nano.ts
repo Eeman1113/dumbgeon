@@ -28,7 +28,12 @@ export function isSupported(): boolean {
   return resolveNamespace() !== null;
 }
 
-export type Platform = "chrome-desktop" | "chrome-mobile" | "ios" | "safari" | "other";
+export type Platform =
+  | "chrome-desktop"   // can run it; may need an update
+  | "chrome-mobile"    // Android Chrome: API not available there
+  | "ios"              // installing Chrome will NOT help; iOS browsers are all WebKit
+  | "desktop-other"    // Safari/Firefox/Edge on a computer: installing Chrome works
+  | "other";
 
 /**
  * Which browser is this, for the purposes of telling the user something true.
@@ -50,8 +55,11 @@ export function detectPlatform(): Platform {
   const isChrome = /Chrome\//.test(ua) && !/Edg\//.test(ua) && !/OPR\//.test(ua);
   if (isChrome) return /Android/.test(ua) ? "chrome-mobile" : "chrome-desktop";
 
-  if (/Safari\//.test(ua)) return "safari";
-  return "other";
+  // Any other mobile browser is in the same position as iOS: no desktop Chrome.
+  if (/Android|Mobile/.test(ua)) return "chrome-mobile";
+
+  // Safari, Firefox or Edge on a computer — installing Chrome actually solves it.
+  return "desktop-other";
 }
 
 export async function checkAvailability(): Promise<NanoStatus> {

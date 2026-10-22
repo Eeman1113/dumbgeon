@@ -82,7 +82,10 @@ export default function Page() {
     // The gate screens are unreachable on a machine where the model works,
     // so ?gate=missing / ?gate=download make them testable.
     const forced = new URLSearchParams(location.search).get("gate");
-    if (forced === "missing" || forced === "ios" || forced === "safari" || forced === "chrome-mobile") {
+    if (forced === "missing" ||
+      forced === "ios" ||
+      forced === "desktop-other" ||
+      forced === "chrome-mobile") {
       setBooting(false);
       setStatus({ kind: "missing" });
       return;

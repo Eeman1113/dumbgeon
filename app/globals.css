@@ -1101,3 +1101,55 @@ code {
     font-size: 0.78em;
   }
 }
+
+/* --- collapsible fallback ------------------------------------------------- */
+
+.fallback {
+  border: 1px solid var(--phosphor-dim);
+  padding: 0 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.fallback > summary {
+  cursor: pointer;
+  padding: 0.85rem 0;
+  font-size: 1.25rem;
+  color: var(--phosphor-mid);
+  text-shadow: var(--bloom-tight);
+  list-style: none;
+}
+
+.fallback > summary::-webkit-details-marker {
+  display: none;
+}
+
+.fallback > summary::before {
+  content: "+ ";
+  color: var(--amber);
+}
+
+.fallback[open] > summary::before {
+  content: "- ";
+}
+
+.fallback > summary:hover,
+.fallback > summary:focus-visible {
+  color: var(--amber);
+}
+
+.fallback[open] {
+  padding-bottom: 1rem;
+}
+
+@media (pointer: coarse) {
+  .fallback > summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+/* An anchor styled as a button should not also look like a link. */
+a.block-button {
+  text-decoration: none;
+}
